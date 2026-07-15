@@ -48,7 +48,6 @@ def create_new_customer(payload: CustomerCreatePayload, db: Session = Depends(ge
             detail=f"Validation Failed: {provider.upper()} does not support zone '{payload.aws_region}'."
         )
 
-    # ─── IF ALL VALIDATIONS ABOVE PASSED, THE CODE CONTINUES HERE ───
    # ─── IF ALL VALIDATIONS ABOVE PASSED, THE CODE CONTINUES HERE ───
     try:
         # 1. Populate Core Customer Profile
@@ -149,4 +148,37 @@ def create_new_customer(payload: CustomerCreatePayload, db: Session = Depends(ge
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Database transaction failure: {str(e)}"
+        )
+    
+@router.get("/", status_code=status.HTTP_200_OK)
+def list_all_customers(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+    """
+    Fetches a list of all recorded customer profiles from the database.
+    Includes built-in pagination limits for UI dashboard scaling.
+    """
+    try:
+        # 1. Query the CUSTOMERS table with offset and maximum bounds
+        customers = db.query(Customer).offset(skip).limit(limit).all()
+        
+        # 2. Format the records into a clean JSON list layout
+        customer_list = []
+        for customer in customers:
+            customer_list.append({
+                "customer_id": customer.id,
+                "customer_name": customer.name,
+                "customer_code": customer.slug,
+                "admin_emailid": customer.admin_emailid,
+                "region": customer.region
+            })
+            
+        return {
+            "success": True,
+            "count": len(customer_list),
+            "data": customer_list
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve customer matrix rows: {str(e)}"
         )
