@@ -1,0 +1,103 @@
+# Python
+*.py[cod]
+__pycache__/
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+autolabelervenv
+parts/
+bin/
+var/
+sdist/
+develop-eggs/
+.installed.cfg
+lib/
+lib64/
+#.github
+
+
+# Virtual Environments
+venv/
+env/
+lablervenv/
+lablervenv
+.env
+.venv
+ENV/
+labelenv/  # Your specific virtual environment
+
+# Django
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+media/
+static/
+staticfiles/
+
+# IDE specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Coverage reports
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+
+# Unit test / reports
+.pytest_cache/
+.tox/
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# Translations
+*.mo
+*.pot
+
+# Node (if using frontend frameworks)
+node_modules/
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Local development settings
+local_settings.py
+
+# Database backups
+*.dump
+*.sql
+
+# Project specific
+media/
+static/
+logs/
+
+
+# Ignore everything in uploads EXCEPT the .gitkeep file
+backend/data/uploads/*
+!backend/data/uploads/.gitkeep
+
+# Do the same for outputs
+backend/data/outputs/*
+!backend/data/outputs/.gitkeep
