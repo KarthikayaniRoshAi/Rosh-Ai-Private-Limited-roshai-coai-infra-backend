@@ -7,11 +7,10 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api import tenants
+from app.api.auth import router as auth_router  
 from app.db.session import engine
 from app.models import Base
 
-# Creates all tables in your local MySQL database if they don't exist yet
-Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title="COAI Infrastructure Provisioning Engine Backend",
@@ -26,8 +25,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Register the exact API router we built
+app.include_router(auth_router)  
 app.include_router(tenants.router)
+
+# Creates all tables in your local MySQL database if they don't exist yet
+Base.metadata.create_all(bind=engine)
 
 @app.get("/")
 def read_root():

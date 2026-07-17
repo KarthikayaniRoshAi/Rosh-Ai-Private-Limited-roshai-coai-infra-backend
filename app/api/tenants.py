@@ -1,15 +1,16 @@
 # app/api/tenants.py
 import uuid
 import re
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from app.db.session import get_db
+from app.db.session import SessionLocal, get_db
 from app.schemas.tenant import CustomerCreatePayload
 from app.models.customer import Customer, Environment
 from app.models.request import DeploymentRequest, CloudTarget
 from app.models.requirements import CoaiRequirement
 from app.models.governance import Plan, Approval
 from app.models.engine_audit import DeploymentRun, AuditLog
+from app.services.worker import run_terraform_pipeline
 
 router = APIRouter(prefix="/api/v1/customers", tags=["Customer Management"])
 
@@ -182,3 +183,76 @@ def list_all_customers(skip: int = 0, limit: int = 100, db: Session = Depends(ge
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to retrieve customer matrix rows: {str(e)}"
         )
+
+@router.post("/{request_id}/provision", status_code=status.HTTP_202_ACCEPTED)
+def proceed_to_infrastructure_provisioning(
+    request_id: str, 
+    background_tasks: BackgroundTasks, 
+    db: Session = Depends(get_db)
+):
+    """
+    Triggered manually by the UI 'Proceed' button.
+    Launches the background automation pipeline worker loop.
+    """
+    # 1. Verify the deployment request exists
+    run_record = db.query(DeploymentRun).filter(DeploymentRun.deployment_request_id == request_id).first()
+    if not run_record:
+        raise HTTPException(status_code=404, detail="Deployment request workspace profile not found.")
+        
+    # 2. Update status indicator state so the frontend UI polling loader wakes up
+    db.query(DeploymentRun).filter(DeploymentRun.deployment_request_id == request_id).update({
+        "status": "PROVISIONING_INFRASTRUCTURE",
+        "progress_percentage": 5
+    })
+    
+    # 3. Pull customer parameters out of DB to build payload dict for background thread
+    request_data = db.query(DeploymentRequest).filter(DeploymentRequest.id == request_id).first()
+    payload_dict = {
+        "customer_name": request_data.customer_code, # Use data present from the DB record
+        "customer_code": request_data.customer_code,
+        "aws_region": request_data.aws_region,
+        "cloud_provider": "aws" # Dynamically pulled in real scenario
+    }
+    
+    db.commit()
+
+    # 4. Hand off execution path directly to the background worker loop thread
+    background_tasks.add_task(
+        run_terraform_pipeline, 
+        request_id=request_id, 
+        payload_dict=payload_dict, 
+        db_factory=SessionLocal
+    )
+
+    return {"success": True, "message": "Infrastructure orchestration engine successfully initialized."}
+# app/api/tenants.py
+
+@router.get("/{request_id}/logs", status_code=status.HTTP_200_OK)
+def get_realtime_deployment_logs(request_id: str, db: Session = Depends(get_db)):
+    """
+    UI Polling Target: Hitted every 10 seconds by the frontend.
+    Returns the current execution percentage status alongside the latest log trace lines.
+    """
+    # 1. Fetch the live progress metrics from the DeploymentRun table
+    run_metrics = db.query(DeploymentRun).filter(DeploymentRun.deployment_request_id == request_id).first()
+    if not run_metrics:
+        raise HTTPException(status_code=404, detail="Active execution workspace metrics not found.")
+
+    # 2. Fetch all log lines emitted by the worker so far, ordered chronologically
+    logs = db.query(AuditLog).filter(AuditLog.deployment_request_id == request_id).order_by(AuditLog.id.asc()).all()
+
+    # 3. Structure the payload array for the UI console terminal component
+    log_stream = []
+    for entry in logs:
+        log_stream.append({
+            "timestamp": str(entry.id), # Or your created_at field if present
+            "source": entry.actor,      # e.g., "Terraform Engine", "QA Test Engine"
+            "message": entry.action
+        })
+
+    return {
+        "success": True,
+        "current_status": run_metrics.status, # e.g., "RUNNING_TERRAFORM", "SUCCESS"
+        "progress_percentage": run_metrics.progress_percentage, # Integer value (0 to 100)
+        "logs": log_stream
+    }

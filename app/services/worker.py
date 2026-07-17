@@ -23,7 +23,7 @@ def run_terraform_pipeline(request_id: str, payload_dict: dict, db_factory):
     db: Session = db_factory()
     
     # Establish absolute directory path to where the infra team's script execution root lives
-    # tf_dir = os.path.abspath("./infra/terraform/projects/dmt/dev")
+    tf_dir = os.path.abspath("./infra/terraform/projects/dmt/dev")
     
     # Map incoming validation parameters cleanly into CLI terminal override argument strings
     tf_vars = [
@@ -48,7 +48,7 @@ def run_terraform_pipeline(request_id: str, payload_dict: dict, db_factory):
             ))
             db.query(DeploymentRun).filter(DeploymentRun.deployment_request_id == request_id).update({"progress_percentage": 10})
             db.commit()
-            time.sleep(3)
+            time.sleep(2)
 
             # Step 2: Stream simulated log lines mimicking typical cloud workspace outputs
             mock_milestones = [
@@ -63,12 +63,55 @@ def run_terraform_pipeline(request_id: str, payload_dict: dict, db_factory):
                 db.add(AuditLog(deployment_request_id=request_id, actor=actor, action=action))
                 db.query(DeploymentRun).filter(DeploymentRun.deployment_request_id == request_id).update({"progress_percentage": progress})
                 db.commit()
-                time.sleep(3) # Pauses briefly so you can actually watch it happen on your UI dashboard panels
+                time.sleep(2) # Pauses briefly so you can actually watch it happen on your UI dashboard panels
 
-            # Success State Update
+            # ─── STEP 3: MOCK PROVISIONING FINISHED & URL CAPTURED ───
+            generated_mock_url = f"https://{payload_dict.get('customer_code', 'tenant')}.coai-platform.net"
+            db.add(AuditLog(
+                deployment_request_id=request_id, 
+                actor="System", 
+                action=f"[MOCK] Infrastructure created successfully. Endpoint generated: {generated_mock_url}"
+            ))
+            db.query(DeploymentRun).filter(DeploymentRun.deployment_request_id == request_id).update({"progress_percentage": 75})
+            db.commit()
+            time.sleep(2)
+
+            # ─── STEP 4: MOCK QA SMOKE TESTING HANDOFF ───
+            db.add(AuditLog(
+                deployment_request_id=request_id, 
+                actor="QA Test Engine", 
+                action=f"[MOCK] Invoking smoke test scripts wrapper against target: {generated_mock_url}"
+            ))
+            db.query(DeploymentRun).filter(DeploymentRun.deployment_request_id == request_id).update({"progress_percentage": 85})
+            db.commit()
+            time.sleep(2)
+
+            db.add(AuditLog(
+                deployment_request_id=request_id, 
+                actor="QA Test Engine", 
+                action="✔ [MOCK] All 12 primary application smoke test assertions PASSED successfully."
+            ))
+            db.commit()
+
+            # ─── STEP 5: MOCK ENGINE HEALTH CHECK ENGINE ───
+            db.add(AuditLog(
+                deployment_request_id=request_id, 
+                actor="System Health Monitor", 
+                action="[MOCK] Initiating application baseline heartbeat polling sequence on pathway /health..."
+            ))
+            db.query(DeploymentRun).filter(DeploymentRun.deployment_request_id == request_id).update({"progress_percentage": 95})
+            db.commit()
+            time.sleep(2)
+
+            # ─── STEP 6: PIPELINE COMPLETE ───
             db.query(Approval).filter(Approval.deployment_request_id == request_id).update({"decision": "PROVISIONING_SUCCESS"})
             db.query(DeploymentRun).filter(DeploymentRun.deployment_request_id == request_id).update({"status": "SUCCESS", "progress_percentage": 100})
-            db.add(AuditLog(deployment_request_id=request_id, actor="System", action="[MOCK] Infrastructure successfully deployed. Verification tests complete."))
+            db.add(AuditLog(
+                deployment_request_id=request_id, 
+                actor="System", 
+                action="[MOCK] Tenant workspace initialization complete. Environment state flipped to ACTIVE."
+            ))
+            db.commit()
             
         # ─── CASE B: RUNNING THE REAL BINARY PIPELINE ENGINE ───
         else:
@@ -95,39 +138,39 @@ def run_terraform_pipeline(request_id: str, payload_dict: dict, db_factory):
                 if not line and process.poll() is not None:
                     break
                 if line.strip():
-                    # Clean line output string to safe MySQL storage capacity sizes (max 255 chars)
-                    cleaned_line = line.strip()[:255]
+                    cleaned_line = line.strip()
                     db.add(AuditLog(deployment_request_id=request_id, actor="Terraform Engine", action=cleaned_line))
                     
                     # Dynamically increment the percentage metric based on text matches to make loading organic
                     if "Creating..." in cleaned_line:
                         db.query(DeploymentRun).filter(DeploymentRun.deployment_request_id == request_id).update({"progress_percentage": 50})
                     elif "Modifying..." in cleaned_line:
-                        db.query(DeploymentRun).filter(DeploymentRun.deployment_request_id == request_id).update({"progress_percentage": 75})
+                        db.query(DeploymentRun).filter(DeploymentRun.deployment_request_id == request_id).update({"progress_percentage": 70})
                         
                     db.commit()
 
             # 4. Process Close Verification Assessment
             if process.returncode == 0:
+                # Once real infra finishes, this placeholder can be replaced with real QA script runs
                 db.query(Approval).filter(Approval.deployment_request_id == request_id).update({"decision": "PROVISIONING_SUCCESS"})
                 db.query(DeploymentRun).filter(DeploymentRun.deployment_request_id == request_id).update({"status": "SUCCESS", "progress_percentage": 100})
                 db.add(AuditLog(deployment_request_id=request_id, actor="System", action="Infrastructure pipeline successfully completed."))
+                db.commit()
             else:
                 raise subprocess.CalledProcessError(process.returncode, cmd)
 
     except Exception as err:
         logger.error(f"Execution engine failure on pipeline ID {request_id}: {str(err)}")
+        db.rollback()
         db.query(Approval).filter(Approval.deployment_request_id == request_id).update({"decision": "PROVISIONING_FAILED"})
         db.query(DeploymentRun).filter(DeploymentRun.deployment_request_id == request_id).update({"status": "FAILED"})
         db.add(AuditLog(
             deployment_request_id=request_id, 
             actor="System", 
-            action=f"Orchestration worker crash loop error: {str(err)}"[:255]
+            action=f"Orchestration worker crash loop error: {str(err)}"
         ))
+        db.commit()
         
     finally:
-        db.commit()
         db.close()
         logger.info(f"Worker run loop wrapped up for request reference context: {request_id}")
-
-

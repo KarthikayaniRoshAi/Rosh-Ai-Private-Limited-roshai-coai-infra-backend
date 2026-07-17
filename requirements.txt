@@ -9,3 +9,5 @@ cmake
 python-dotenv
 cryptography 
 PyMySQL
+PyJWT
+passlib[bcrypt]
